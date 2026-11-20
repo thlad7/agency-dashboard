@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Agency Dashboard</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#16181d;--muted:#5d6470;--line:#e3e6ea;--accent:#1d6b57;--warn:#b45309;--bad:#b42318;--good:#1d6b57}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1114;--card:#181b20;--ink:#eef0f3;--muted:#9aa3ae;--line:#2a2f36;--accent:#4fb79a;--warn:#f0a548;--bad:#f2766b;--good:#4fb79a}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif}
+main{max-width:720px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:4px 0 2px}h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:22px 0 8px}
+.sub{color:var(--muted);font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:12px}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+.tile b{display:block;font-size:22px;font-variant-numeric:tabular-nums}.tile span{color:var(--muted);font-size:12px}
+.bar{height:6px;background:var(--line);border-radius:3px;margin-top:8px;overflow:hidden}.bar i{display:block;height:100%;background:var(--accent)}
+.list{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.row{display:flex;gap:10px;align-items:baseline;padding:10px 12px;border-top:1px solid var(--line)}.row:first-child{border-top:0}
+.row .k{font-weight:600;white-space:nowrap}.row .v{flex:1;min-width:0;overflow-wrap:anywhere}.row .t{color:var(--muted);font-size:12px;white-space:nowrap}
+.pill{font-size:11px;padding:2px 7px;border-radius:99px;border:1px solid var(--line);white-space:nowrap}
+.good{color:var(--good)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+.day{font-weight:600;margin:14px 0 4px;color:var(--accent)}ul{margin:0;padding-left:18px}li{margin:3px 0}
+.stale{background:var(--card);border:1px solid var(--warn);color:var(--warn);border-radius:12px;padding:10px 12px;margin-top:12px;font-size:13px}
+form{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-top:24px}
+input{width:100%;font:inherit;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);margin:10px 0}
+button{width:100%;font:inherit;font-weight:600;padding:12px;border:0;border-radius:10px;background:var(--accent);color:#fff}
+.err{color:var(--bad);font-size:13px;min-height:1em}
+</style>
+</head>
+<body>
+<main id="app"><h1>Agency Dashboard</h1><div class="sub">Loading…</div></main>
+<script>
+const KEY = "agency-dash-pass";
+const app = document.getElementById("app");
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+function store(fn){ try { return fn(); } catch { return null; } }
+
+async function decrypt(blob, pass){
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pass), "PBKDF2", false, ["deriveKey"]);
+  const key = await crypto.subtle.deriveKey({name:"PBKDF2", salt:b64(blob.salt), iterations:blob.iter, hash:"SHA-256"},
+    base, {name:"AES-GCM", length:256}, false, ["decrypt"]);
+  const pt = await crypto.subtle.decrypt({name:"AES-GCM", iv:b64(blob.iv)}, key, b64(blob.ct));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+function ago(ts){
+  if(!ts) return "-";
+  const m = Math.floor((Date.now() - new Date(ts)) / 60000);
+  return m < 60 ? m + "m ago" : m < 1440 ? Math.floor(m/60) + "h ago" : Math.floor(m/1440) + "d ago";
+}
+
+function render(d){
+  const p = [];
+  const age = (Date.now() - new Date(d.generatedAt)) / 60000;
+  p.push(`<h1>Redeemed Revenue Co</h1><div class="sub">Snapshot ${esc(new Date(d.generatedAt).toLocaleString())} &middot; page checks for updates every 2 min</div>`);
+  if (age > 20) p.push(`<div class="stale">This snapshot is ${ago(d.generatedAt)}. The Mac that sends updates may be asleep or off.</div>`);
+  if (d.error) p.push(`<div class="stale">Paperclip was not responding at snapshot time: ${esc(d.error)}</div>`);
+  if (d.costs){
+    const c = d.costs, t = d.tasks, a = d.agents, pct = Math.min(100, +c.monthUtilizationPercent || 0);
+    p.push(`<div class="grid">
+      <div class="tile"><span>Spend this month</span><b>$${(c.monthSpendCents/100).toFixed(2)}</b><span>of $${(c.monthBudgetCents/100).toFixed(0)}</span><div class="bar"><i style="width:${pct}%"></i></div></div>
+      <div class="tile"><span>Tasks</span><b>${t.open} open</b><span>${t.blocked} blocked &middot; ${t.done} done</span></div>
+      <div class="tile"><span>Agents</span><b>${a.running} running</b><span>${a.active} active &middot; ${a.error} error</span></div>
+      <div class="tile"><span>Board authority</span><b>${esc(d.authority)}</b><span>no new spending</span></div></div>`);
+    p.push(`<h2>Agents</h2><div class="list">` + d.agentList.map(x =>
+      `<div class="row"><span class="k">${esc(x.name)}</span><span class="v">${esc(x.model)}</span><span class="pill">${esc(x.status)}</span></div>`).join("") + `</div>`);
+    p.push(`<h2>Recent runs</h2><div class="list">` + d.runs.map(r => {
+      const cls = r.status === "succeeded" ? "good" : (r.status === "running" || r.status === "queued") ? "warn" : "bad";
+      return `<div class="row"><span class="k ${cls}">${esc(r.status)}</span><span class="v">${esc(r.agent)}</span><span class="t">${ago(r.createdAt)}</span></div>`;
+    }).join("") + `</div>`);
+    p.push(`<h2>Latest tasks</h2><div class="list">` + d.issues.map(i => {
+      const cls = i.status === "blocked" ? "bad" : i.status === "done" ? "good" : "warn";
+      return `<div class="row"><span class="k">${esc(i.id)}</span><span class="v">${esc(i.title)}</span><span class="pill ${cls}">${esc(i.status)}</span></div>`;
+    }).join("") + `</div>`);
+  }
+  p.push(`<h2>Cliff notes (since we started)</h2><div class="tile">` + d.notes.map(s =>
+    `<div class="day">${esc(s.day)}</div><ul>` + s.items.map(x => `<li>${esc(x)}</li>`).join("") + `</ul>`).join("") + `</div>`);
+  p.push(`<p class="sub" style="margin-top:24px"><a href="#" id="lock" style="color:inherit">Forget passphrase on this device</a></p>`);
+  app.innerHTML = p.join("");
+  document.getElementById("lock").onclick = e => { e.preventDefault(); store(() => localStorage.removeItem(KEY)); location.reload(); };
+}
+
+function askPass(msg){
+  app.innerHTML = `<h1>Agency Dashboard</h1><form id="f"><div>Enter the dashboard passphrase.</div>
+    <input id="p" type="password" autocomplete="current-password" autocapitalize="off" spellcheck="false">
+    <div class="err">${esc(msg || "")}</div><button>Open</button></form>`;
+  document.getElementById("f").onsubmit = async e => { e.preventDefault(); await load(document.getElementById("p").value.trim(), true); };
+}
+
+let blobCache = null;
+async function fetchBlob(){
+  const r = await fetch("data.enc.json?t=" + Date.now(), {cache:"no-store"});
+  if (!r.ok) throw new Error("no data yet");
+  return r.json();
+}
+
+async function load(pass, fromForm){
+  try {
+    blobCache = await fetchBlob();
+  } catch (e) {
+    if (!blobCache) { app.innerHTML = `<h1>Agency Dashboard</h1><div class="sub">No data published yet.</div>`; return; }
+  }
+  try {
+    const d = await decrypt(blobCache, pass);
+    if (fromForm) store(() => localStorage.setItem(KEY, pass));
+    render(d);
+  } catch {
+    store(() => localStorage.removeItem(KEY));
+    askPass(fromForm ? "That passphrase didn't work." : "");
+  }
+}
+
+const saved = store(() => localStorage.getItem(KEY));
+if (saved) load(saved, false); else askPass("");
+setInterval(() => { const s = store(() => localStorage.getItem(KEY)); if (s) load(s, false); }, 120000);
+</script>
+</body>
+</html>
